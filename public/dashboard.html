@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="th" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dashboard</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="/dashboard.css" />
+</head>
+
+<body data-page="dashboard">
+  <div class="bg" aria-hidden="true"></div>
+
+  <div class="wrap">
+    <header class="top">
+      <div class="brand">
+        <div class="brandRow">
+          <div class="logo" aria-hidden="true">◆</div>
+          <div class="brandText">
+            <h1>Dashboard</h1>
+            <div class="subtitle">ภาพรวม • รายการ • อุปกรณ์</div>
+          </div>
+        </div>
+        <div class="metaChips">
+          <span class="chip chipLive" title="Live data">● LIVE</span>
+        </div>
+      </div>
+
+      <div class="controls">
+        <div class="field">
+          <label for="deviceId">Device</label>
+          <input id="deviceId" placeholder="ALL or DEV1" />
+        </div>
+
+        <div class="field">
+          <label for="refreshMs">Refresh</label>
+          <select id="refreshMs">
+            <option value="2000">2s</option>
+            <option value="3000">3s</option>
+            <option value="5000">5s</option>
+            <option value="10000">10s</option>
+          </select>
+        </div>
+
+        <button id="btnApply" class="btn btnPrimary" type="button">Apply</button>
+
+        <button id="btnTheme" class="btn btnGhost" type="button" title="Toggle theme">
+          <span id="themeIcon" aria-hidden="true">☾</span>
+          <span class="hideSm">Theme</span>
+        </button>
+
+        <a class="btn btnGhost btnNav" href="/settings.html" title="Config + OTA">
+          <span class="btnIcon" aria-hidden="true">⚙</span>
+          <span>Settings</span>
+        </a>
+
+        <div class="lastLine">
+          <span id="lastUpdate" class="muted"></span>
+        </div>
+      </div>
+    </header>
+
+    <section class="rangeBar">
+      <div class="pickers">
+        <div class="field mini">
+          <label for="pickYear">Year</label>
+          <select id="pickYear"></select>
+        </div>
+
+        <div class="field mini">
+          <label for="pickMonth">Month</label>
+          <select id="pickMonth"></select>
+        </div>
+
+        <div class="field mini">
+          <label for="pickDay">Day</label>
+          <select id="pickDay"></select>
+        </div>
+
+        <button id="btnNow" class="btn btnGhost" type="button">Today</button>
+
+        <button id="btnChart" class="btn btnGhost btnChart" type="button" title="Toggle cumulative chart">
+          <span class="btnIcon" aria-hidden="true">📈</span>
+          <span class="hideSm">Chart</span>
+        </button>
+
+        <div class="rangeHint muted small" id="rangeHint"></div>
+      </div>
+    </section>
+
+    <section class="cards">
+      <!-- Config moved to /config.html -->
+    </section>
+
+    <!-- Chart Drawer -->
+    <section id="chartDrawer" class="chartDrawer" hidden>
+      <div class="chartHead">
+        <div>
+          <h2>Cumulative Revenue</h2>
+          <div class="muted small">Cumulative revenue over the selected time range</div>
+        </div>
+        <button id="chartClose" class="btn btnGhost" type="button" title="Close chart">Close</button>
+      </div>
+
+      <div class="chartBody">
+        <canvas id="chartCanvas" class="chartCanvas"></canvas>
+      </div>
+      <div id="chartMeta" class="chartMeta muted small"></div>
+    </section>
+
+    <section class="cards">
+      <div class="card kpi">
+        <div class="kpiTop">
+          <div class="kpiIcon kpiMoney">฿</div>
+          <div>
+            <div class="label">Total Received</div>
+            <div class="subLabel">Paid successfully</div>
+          </div>
+        </div>
+        <div id="totalPaid" class="value">-</div>
+      </div>
+
+      <div class="card kpi">
+        <div class="kpiTop">
+          <div class="kpiIcon kpiOk">✓</div>
+          <div>
+            <div class="label">Paid</div>
+            <div class="subLabel">Transactions</div>
+          </div>
+        </div>
+        <div id="countPaid" class="value">-</div>
+      </div>
+
+      <div class="card kpi">
+        <div class="kpiTop">
+          <div class="kpiIcon kpiAll">≡</div>
+          <div>
+            <div class="label">All</div>
+            <div class="subLabel">All statuses</div>
+          </div>
+        </div>
+        <div id="countAll" class="value">-</div>
+      </div>
+    </section>
+
+<section class="mapWrap" id="gps">
+  <div class="card mapCard">
+    <div class="mapHeader">
+      <div>
+        <h2 class="cardTitle">Device Location (GPS)</h2>
+        <div class="muted small">Latest location per device • click marker for details</div>
+      </div>
+      <div class="mapTools">
+        <button id="btnLocRefresh" class="btn btnGhost" type="button">Refresh</button>
+        <div id="locStatus" class="muted small"></div>
+      </div>
+    </div>
+    <div id="map" class="map"></div>
+    <div id="locList" class="locList"></div>
+  </div>
+</section>
+
+
+    <section class="tableWrap">
+      <div class="tableHeader">
+        <div>
+          <h2>Recent Transactions</h2>
+          <div class="muted small">Shows 10 items/page • Click Invoice to open the link</div>
+        </div>
+
+        <div class="tableTools">
+          <div class="searchBox">
+            <span class="searchIcon" aria-hidden="true">⌕</span>
+            <input id="search" placeholder="    Search Invoice / Device / Status…" />
+          </div>
+
+          <button id="btnCsvMonth" class="btn btnGhost" type="button" title="Export monthly CSV">CSV Month</button>
+          <button id="btnCsvYear"  class="btn btnGhost" type="button" title="Export yearly CSV">CSV Year</button>
+
+          <button id="btnRefresh" class="btn btnGhost" type="button">Refresh</button>
+        </div>
+      </div>
+
+      <div class="tableScroller">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 170px;">Time</th>
+              <th style="width: 170px;">Invoice</th>
+              <th style="width: 120px;">Device</th>
+              <th style="width: 100px;">Amount</th>
+              <th style="width: 140px;">Status</th>
+              <th style="width: 78px; text-align:right;">Copy</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="pager">
+        <div class="muted small" id="pagerInfo">-</div>
+        <div class="pagerBtns">
+          <button id="btnPrev" class="btn btnGhost" type="button">Prev</button>
+          <div class="pageChip"><span id="pageNow">1</span> / <span id="pageTotal">1</span></div>
+          <button id="btnNext" class="btn btnGhost" type="button">Next</button>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer muted">
+      Device: <b>ALL</b> = all devices • enter <b>DEV----</b> to filter a specific device
+    </footer>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/dashboard.js"></script>
+</body>
+</html>

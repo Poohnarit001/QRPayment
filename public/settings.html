@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="th" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Settings</title>
+  <link rel="stylesheet" href="/dashboard.css" />
+</head>
+
+<body data-page="settings">
+  <div class="bg" aria-hidden="true"></div>
+
+  <div class="wrap">
+    <header class="top">
+      <div class="brand">
+        <div class="brandRow">
+          <div class="logo" aria-hidden="true">⚙</div>
+          <div class="brandText">
+            <h1>Settings</h1>
+            <div class="subtitle">ตั้งค่าอุปกรณ์</div>
+          </div>
+        </div>
+        <div class="metaChips">
+          <span class="chip chipLive" title="กำลังทำงาน">● LIVE</span>
+        </div>
+      </div>
+
+      <div class="controls">
+        <a class="btn btnGhost btnNav" href="/dashboard.html">← Dashboard</a>
+
+        <button id="btnTheme" class="btn btnGhost" type="button" title="สลับธีม">
+          <span id="themeIcon" aria-hidden="true">☾</span>
+          <span class="hideSm">Theme</span>
+        </button>
+
+        <div class="lastLine">
+          <span id="hint" class="muted"></span>
+        </div>
+      </div>
+    </header>
+
+    <section class="cards">
+      <!-- ===== Device Config ===== -->
+      <div class="card" style="grid-column: 1 / -1;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap;">
+          <div>
+            <h2 style="margin:0;">💳 จำนวนเงิน (A1/A2/A3)</h2>
+            <div class="muted small">ใส่ Device แล้วกด Load/Save</div>
+          </div>
+          <div class="muted small">ตัวอย่าง Device: DEV3A1F</div>
+        </div>
+
+        <div class="formRow" style="margin-top:12px;">
+          <div class="field mini">
+            <label for="cfgDev">Device</label>
+            <input id="cfgDev" placeholder="DEVxxxx" />
+          </div>
+          <div class="field mini">
+            <label for="cfgA1">A1</label>
+            <input id="cfgA1" placeholder="10" inputmode="numeric" />
+          </div>
+          <div class="field mini">
+            <label for="cfgA2">A2</label>
+            <input id="cfgA2" placeholder="20" inputmode="numeric" />
+          </div>
+          <div class="field mini">
+            <label for="cfgA3">A3</label>
+            <input id="cfgA3" placeholder="30" inputmode="numeric" />
+          </div>
+          <div class="actions">
+            <button id="btnCfgLoad" class="btn btnGhost" type="button">Load</button>
+            <button id="btnCfgSave" class="btn btnPrimary" type="button">Save</button>
+            <button id="btnCfgSaveAll" class="btn btnGhost" type="button" title="ตั้งค่าชุดนี้ให้ทุกเครื่อง (รวมถึงค่าเริ่มต้น ALL)">Save ALL</button>
+          </div>
+        </div>
+
+        <div class="muted small" style="margin-top:10px; line-height:1.6;">
+          <div>• ขณะกำลังจ่ายเงินระบบจะไม่เปลี่ยนยอด เพื่อป้องกันสแกนผิด</div>
+        </div>
+      </div>
+
+      <!-- ===== Image Upload (Splash/Background) ===== -->
+      <div class="card" style="grid-column: 1 / -1;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap;">
+          <div>
+            <h2 style="margin:0;">🖼 ภาพพื้นหลัง (Splash)</h2>
+            <div class="muted small">JPG 480×320 • ≤ 250KB</div>
+          </div>
+          <div class="muted small" id="imgInfo">-</div>
+        </div>
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; align-items:flex-end;">
+          <div class="field mini">
+            <label for="imgTarget">Target</label>
+            <select id="imgTarget">
+              <option value="ALL">ALL (ทุกเครื่อง)</option>
+              <option value="DEVICE">Device (ใช้ช่อง Device ด้านบน)</option>
+            </select>
+          </div>
+
+          <div class="field" style="min-width: 260px;">
+            <label for="imgFile">ไฟล์ .jpg</label>
+            <input id="imgFile" type="file" accept="image/jpeg,.jpg,.jpeg" />
+          </div>
+
+          <button id="btnImgUpload" class="btn btnPrimary" type="button">Upload</button>
+          <button id="btnImgPreview" class="btn btnGhost" type="button">Preview</button>
+          <a id="btnImgOpen" class="btn btnGhost btnNav" href="/images/splash.jpg" target="_blank" rel="noreferrer" title="เปิดรูปในแท็บใหม่">
+            <span class="btnIcon" aria-hidden="true">🖼</span>
+            <span>Open</span>
+          </a>
+        </div>
+
+        <div class="imgPreviewWrap">
+          <img id="imgPreview" class="imgPreview" alt="preview" />
+        </div>
+      </div>
+
+      <!-- ===== GPS Status (for selected device) ===== -->
+      <div class="card" style="grid-column: 1 / -1;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap;">
+          <div>
+            <h2 style="margin:0;">🛰 GPS</h2>
+            <div class="muted small">ตำแหน่งล่าสุด (จาก /api/device/location)</div>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <button id="btnGpsRefresh" class="btn btnGhost" type="button">Refresh</button>
+            <a class="btn btnGhost btnNav" href="/dashboard.html#gps" title="Open GPS map">
+              <span class="btnIcon" aria-hidden="true">🗺</span>
+              <span>GPS Map</span>
+            </a>
+          </div>
+        </div>
+
+        <div id="gpsStatusBox" class="muted small" style="margin-top:12px; line-height:1.85;">-</div>
+      </div>
+
+      <!-- ===== OTA ===== -->
+      <div class="card" style="grid-column: 1 / -1;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap;">
+          <div>
+            <h2 style="margin:0;">⬆ OTA</h2>
+            <div class="muted small">อัปโหลด .bin + เพิ่ม Version</div>
+          </div>
+          <div class="muted small" id="curInfo">กำลังโหลด...</div>
+        </div>
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; align-items:flex-end;">
+          <div class="field mini">
+            <label for="otaVersion">Version ใหม่</label>
+            <input id="otaVersion" placeholder="เช่น 1.6.10" />
+          </div>
+
+          <div class="field" style="min-width: 260px;">
+            <label for="otaFile">ไฟล์ .bin</label>
+            <input id="otaFile" type="file" accept=".bin,application/octet-stream" />
+          </div>
+
+          <button id="btnOtaUpload" class="btn btnPrimary" type="button">Upload</button>
+          <a id="btnManifest" class="btn btnGhost btnNav" href="/api/ota/manifest" target="_blank" rel="noreferrer" title="ดู manifest">Manifest</a>
+          <a id="btnBin" class="btn btnGhost btnNav" href="/ota/firmware.bin" target="_blank" rel="noreferrer" title="ดาวน์โหลดไฟล์ปัจจุบัน">Download .bin</a>
+        </div>
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; align-items:flex-end;">
+          <div class="field mini">
+            <label for="applyTime">Apply update after</label>
+            <input id="applyTime" type="time" step="60" />
+          </div>
+          <button id="btnSaveSchedule" class="btn btnGhost" type="button">Save schedule</button>
+          <div class="muted small" id="schedInfo" style="min-width: 240px;"></div>
+        </div>
+
+        <div class="muted small" style="margin-top:10px; line-height:1.6;">
+          <div>• กด Sketch -> Export Compiled Binary จะได้เป็นไฟล์ .bin</div>
+          <div>• ทุกครั้งที่อัปโหลด ให้ “เพิ่มเลข Version” เพื่อให้บอร์ดรู้ว่ามีของใหม่</div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer muted">
+      Tip: ใส่ Device แล้วกด Load
+    </footer>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/settings.js"></script>
+</body>
+</html>
