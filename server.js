@@ -78,6 +78,7 @@ const PORT = process.env.PORT || 8787;
 const BASE_URL = (process.env.BASE_URL || "").replace(/\/$/, "");
 const XENDIT_SECRET_KEY = process.env.XENDIT_SECRET_KEY;
 const XENDIT_WEBHOOK_TOKEN = process.env.XENDIT_WEBHOOK_TOKEN || "";
+const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || "";
 
 // Serve images from data/images at /images/...
 ensureDirSync(IMG_DIR);
@@ -128,6 +129,25 @@ function guessDeviceId(external_id) {
   if (!external_id) return null;
   const m = String(external_id).match(/^iot_([^_]+)_/i);
   return m ? String(m[1]).trim().toUpperCase() : null;
+}
+
+
+async function sendDiscordNotification({ invoice_id, device_id, amount, status, paid_at }) {
+  if (!DISCORD_WEBHOOK_URL) return;
+
+  const paidText = paid_at
+    ? new Date(paid_at).toLocaleString("th-TH", { timeZone: "Asia/Bangkok" })
+    : new Date().toLocaleString("th-TH", { timeZone: "Asia/Bangkok" });
+
+  const msg =
+    `✅ รับเงินแล้ว\n` +
+    `เครื่อง: ${device_id || "-"}\n` +
+    `จำนวน: ฿${Number(amount || 0).toLocaleString("th-TH")}\n` +
+    `สถานะ: ${status || "-"}\n` +
+    `เวลา: ${paidText}\n` +
+    `invoice: ${invoice_id || "-"}`;
+
+  await axios.post(DISCORD_WEBHOOK_URL, { content: msg });
 }
 
 // ===== MySQL =====
@@ -578,17 +598,32 @@ app.post("/webhooks/xendit/invoice", async (req, res) => {
     const body = req.body || {};
     const invoice_id = body.id || body.invoice_id;
     const status = normalizeStatus(body.status);
+    const device_id = guessDeviceId(body.external_id);
 
     if (invoice_id) {
       await upsertTx({
         invoice_id,
         external_id: body.external_id,
-        device_id: guessDeviceId(body.external_id),
+        device_id,
         amount: body.amount,
         status,
         paid_at: body.paid_at || null,
         invoice_url: body.invoice_url || null,
       });
+
+      if (status === "PAID") {
+        try {
+          await sendDiscordNotification({
+            invoice_id,
+            device_id,
+            amount: body.amount,
+            status,
+            paid_at: body.paid_at || null,
+          });
+        } catch (notifyErr) {
+          console.error("DISCORD NOTIFY ERROR:", notifyErr?.response?.data || notifyErr?.message || notifyErr);
+        }
+      }
     }
 
     return res.status(200).send("OK");

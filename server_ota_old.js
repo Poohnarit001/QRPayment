@@ -6,8 +6,7 @@ const path = require("path");
 const fs = require("fs");
 const multer = require("multer");
 
-const { open } = require("sqlite");
-const sqlite3 = require("sqlite3");
+const mysql = require("mysql2/promise");
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -26,7 +25,10 @@ const otaUpload = multer({
 });
 
 // ===== Image upload (web config) =====
-const IMG_DIR = path.join(__dirname, "data", "images");
+// Upload background/splash jpg into ./public/images
+// - device_id = "ALL" -> public/images/splash.jpg
+// - device_id = "DEVxxxx" -> public/images/splash_DEVxxxx.jpg
+const IMG_DIR = path.join(__dirname, "public", "images");
 
 function ensureDirSync(p) {
   if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
@@ -77,10 +79,27 @@ const BASE_URL = (process.env.BASE_URL || "").replace(/\/$/, "");
 const XENDIT_SECRET_KEY = process.env.XENDIT_SECRET_KEY;
 const XENDIT_WEBHOOK_TOKEN = process.env.XENDIT_WEBHOOK_TOKEN || "";
 
+// Serve images from data/images at /images/...
+ensureDirSync(IMG_DIR);
+app.use('/images', express.static(IMG_DIR, { etag: false, maxAge: 0 }));
+
 // ===== static dashboard files =====
 // Put dashboard.* into ./public
 app.use(express.static(path.join(__dirname, "public")));
-app.get("/", (req, res) => res.redirect("/dashboard.html"));
+app.get("/", (req, res) => res.redirect("/dashboard"));
+
+app.get("/dashboard", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "dashboard.html"));
+});
+
+app.get("/settings", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "settings.html"));
+});
+
+app.get("/dashboard.html", (req, res) => res.redirect("/dashboard"));
+app.get("/settings.html", (req, res) => res.redirect("/settings"));
+app.get("/config.html", (req, res) => res.redirect("/settings"));
+app.get("/ota.html", (req, res) => res.redirect("/settings"));
 
 // ===== Xendit client =====
 const xendit = axios.create({
@@ -111,61 +130,101 @@ function guessDeviceId(external_id) {
   return m ? String(m[1]).trim().toUpperCase() : null;
 }
 
-// ===== SQLite =====
+// ===== MySQL =====
 let db;
+let pool;
+
+function requireDbEnv() {
+  const need = (k) => {
+    const v = process.env[k];
+    if (!v) throw new Error(`Missing ${k} in .env`);
+    return v;
+  };
+  return {
+    host: need("DB_HOST"),
+    port: Number(process.env.DB_PORT || 3306),
+    name: need("DB_NAME"),
+    user: need("DB_USER"),
+    pass: need("DB_PASS"),
+  };
+}
 
 async function initDb() {
-  const dataDir = path.join(__dirname, "data");
-  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+  const cfg = requireDbEnv();
 
-  const dbPath = path.join(dataDir, "payqr.sqlite");
-  db = await open({ filename: dbPath, driver: sqlite3.Database });
+  pool = mysql.createPool({
+    host: cfg.host,
+    port: cfg.port,
+    user: cfg.user,
+    password: cfg.pass,
+    database: cfg.name,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+  });
 
-  await db.exec(`
-    PRAGMA journal_mode = WAL;
-    PRAGMA synchronous = NORMAL;
-
+  // Create tables (fresh install). If tables already exist, MySQL will keep them as-is.
+  await pool.execute(`
     CREATE TABLE IF NOT EXISTS transactions (
-      invoice_id   TEXT PRIMARY KEY,
-      external_id  TEXT,
-      device_id    TEXT,
-      amount       INTEGER,
-      status       TEXT,
-      paid_at      TEXT,
-      invoice_url  TEXT,
-      created_at   INTEGER NOT NULL,
-      updated_at   INTEGER NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_tx_device_updated ON transactions(device_id, updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_tx_status_updated ON transactions(status, updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_tx_created ON transactions(created_at);
-
-    -- Device config (amount buttons etc.)
-    CREATE TABLE IF NOT EXISTS device_location (
-  device_id    TEXT PRIMARY KEY,
-  device_name  TEXT,
-  fix          INTEGER NOT NULL DEFAULT 0,
-  lat          REAL,
-  lon          REAL,
-  hdop         REAL,
-  gps_svs      INTEGER,
-  updated_at   INTEGER NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_loc_updated ON device_location(updated_at DESC);
-
-CREATE TABLE IF NOT EXISTS device_config (
-
-      device_id   TEXT PRIMARY KEY,
-      a1          INTEGER NOT NULL,
-      a2          INTEGER NOT NULL,
-      a3          INTEGER NOT NULL,
-      updated_at  INTEGER NOT NULL
-    );
+      invoice_id   VARCHAR(80) PRIMARY KEY,
+      external_id  VARCHAR(160),
+      device_id    VARCHAR(32),
+      amount       INT,
+      status       VARCHAR(20),
+      paid_at      VARCHAR(64),
+      invoice_url  VARCHAR(255),
+      created_at   BIGINT NOT NULL,
+      updated_at   BIGINT NOT NULL,
+      INDEX idx_tx_device_updated (device_id, updated_at),
+      INDEX idx_tx_status_updated (status, updated_at),
+      INDEX idx_tx_created (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
 
-  console.log("[DB] ready:", dbPath);
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS device_location (
+      device_id    VARCHAR(32) PRIMARY KEY,
+      device_name  VARCHAR(120),
+      fix          TINYINT NOT NULL DEFAULT 0,
+      lat          DOUBLE,
+      lon          DOUBLE,
+      hdop         DOUBLE,
+      gps_svs      INT,
+      updated_at   BIGINT NOT NULL,
+      INDEX idx_loc_updated (updated_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS device_config (
+      device_id   VARCHAR(32) PRIMARY KEY,
+      a1          INT NOT NULL,
+      a2          INT NOT NULL,
+      a3          INT NOT NULL,
+      updated_at  BIGINT NOT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  // SQLite-like helpers used throughout the codebase: db.get / db.all / db.run
+  db = {
+    async get(sql, params = []) {
+      const [rows] = await pool.execute(sql, params);
+      return rows?.[0] || null;
+    },
+    async all(sql, params = []) {
+      const [rows] = await pool.execute(sql, params);
+      return rows || [];
+    },
+    async run(sql, params = []) {
+      const [result] = await pool.execute(sql, params);
+      return result;
+    },
+  };
+
+  // Ping
+  await db.get("SELECT 1 AS ok");
+
+  console.log("[DB] MySQL ready:", `${cfg.user}@${cfg.host}:${cfg.port}/${cfg.name}`);
 }
 
 async function upsertDeviceConfig(device_id, a1, a2, a3) {
@@ -174,11 +233,11 @@ async function upsertDeviceConfig(device_id, a1, a2, a3) {
     `
     INSERT INTO device_config(device_id, a1, a2, a3, updated_at)
     VALUES(?,?,?,?,?)
-    ON CONFLICT(device_id) DO UPDATE SET
-      a1 = excluded.a1,
-      a2 = excluded.a2,
-      a3 = excluded.a3,
-      updated_at = excluded.updated_at
+    ON DUPLICATE KEY UPDATE
+      a1 = VALUES(a1),
+      a2 = VALUES(a2),
+      a3 = VALUES(a3),
+      updated_at = VALUES(updated_at)
     `,
     [device_id, a1, a2, a3, now]
   );
@@ -196,14 +255,14 @@ async function upsertTx(partial) {
       (invoice_id, external_id, device_id, amount, status, paid_at, invoice_url, created_at, updated_at)
     VALUES
       (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(invoice_id) DO UPDATE SET
-      external_id = COALESCE(excluded.external_id, transactions.external_id),
-      device_id   = COALESCE(excluded.device_id,   transactions.device_id),
-      amount      = COALESCE(excluded.amount,      transactions.amount),
-      status      = COALESCE(excluded.status,      transactions.status),
-      paid_at     = COALESCE(excluded.paid_at,     transactions.paid_at),
-      invoice_url = COALESCE(excluded.invoice_url, transactions.invoice_url),
-      updated_at  = excluded.updated_at
+    ON DUPLICATE KEY UPDATE
+      external_id = COALESCE(VALUES(external_id), external_id),
+      device_id   = COALESCE(VALUES(device_id),   device_id),
+      amount      = COALESCE(VALUES(amount),      amount),
+      status      = COALESCE(VALUES(status),      status),
+      paid_at     = COALESCE(VALUES(paid_at),     paid_at),
+      invoice_url = COALESCE(VALUES(invoice_url), invoice_url),
+      updated_at  = VALUES(updated_at)
     `,
     [
       partial.invoice_id,
@@ -245,31 +304,32 @@ async function getSummary(device_id) {
 }
 
 async function listTx(device_id, limit = 50) {
-  limit = Math.max(1, Math.min(200, Number(limit) || 50));
+  // กัน limit แปลกๆ และให้เป็นตัวเลขล้วน (1..200)
+  const lim = Math.max(1, Math.min(200, Number(limit) || 50));
 
   if (device_id) {
     return db.all(
       `
       SELECT invoice_id, external_id, device_id, amount, status, paid_at, invoice_url, created_at, updated_at
-      FROM transactions
+      FROM \`transactions\`
       WHERE device_id = ?
       ORDER BY updated_at DESC
-      LIMIT ?
+      LIMIT ${lim}
       `,
-      [device_id, limit]
+      [device_id]
     );
   }
 
   return db.all(
     `
     SELECT invoice_id, external_id, device_id, amount, status, paid_at, invoice_url, created_at, updated_at
-    FROM transactions
+    FROM \`transactions\`
     ORDER BY updated_at DESC
-    LIMIT ?
-    `,
-    [limit]
+    LIMIT ${lim}
+    `
   );
 }
+
 
 // ===== health =====
 app.get("/health", (req, res) => res.status(200).send("OK"));
@@ -538,7 +598,7 @@ app.post("/webhooks/xendit/invoice", async (req, res) => {
   }
 });
 
-// ===== 4) Dashboard APIs (read from SQLite) =====
+// ===== 4) Dashboard APIs =====
 app.get("/api/dashboard/summary", async (req, res) => {
   try {
     let device_id = req.query.device_id ? String(req.query.device_id).trim().toUpperCase() : "";
@@ -633,6 +693,83 @@ app.get("/api/dashboard/locations", async (req, res) => {
 });
 
 ;
+
+
+
+// POST /api/device/location
+// body: { device_id, device_name?, fix, lat?, lon?, hdop?, gps_svs? }
+app.post("/api/device/location", async (req, res) => {
+  try {
+    const device_id = safeDeviceId(req.body?.device_id);
+    const device_name = String(req.body?.device_name || device_id || "").trim().slice(0, 120);
+    const fix = Number(req.body?.fix) ? 1 : 0;
+
+    if (!device_id || device_id === "ALL") {
+      return res.status(400).json({ ok: false, error: "device_id required" });
+    }
+
+    const latRaw = req.body?.lat;
+    const lonRaw = req.body?.lon;
+    const hdopRaw = req.body?.hdop;
+    const gpsSvsRaw = req.body?.gps_svs;
+
+    const lat = (latRaw === undefined || latRaw === null || latRaw === "") ? null : Number(latRaw);
+    const lon = (lonRaw === undefined || lonRaw === null || lonRaw === "") ? null : Number(lonRaw);
+    const hdop = (hdopRaw === undefined || hdopRaw === null || hdopRaw === "") ? null : Number(hdopRaw);
+    const gps_svs = (gpsSvsRaw === undefined || gpsSvsRaw === null || gpsSvsRaw === "") ? null : Math.trunc(Number(gpsSvsRaw));
+
+    if (fix) {
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        return res.status(400).json({ ok: false, error: "lat/lon required when fix=1" });
+      }
+      if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+        return res.status(400).json({ ok: false, error: "lat/lon out of range" });
+      }
+    }
+
+    const now = Date.now();
+
+    await db.run(
+      `
+      INSERT INTO device_location (device_id, device_name, fix, lat, lon, hdop, gps_svs, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        device_name = VALUES(device_name),
+        fix = VALUES(fix),
+        lat = VALUES(lat),
+        lon = VALUES(lon),
+        hdop = VALUES(hdop),
+        gps_svs = VALUES(gps_svs),
+        updated_at = VALUES(updated_at)
+      `,
+      [
+        device_id,
+        device_name || device_id,
+        fix,
+        fix ? lat : null,
+        fix ? lon : null,
+        fix && Number.isFinite(hdop) ? hdop : null,
+        fix && Number.isFinite(gps_svs) ? gps_svs : null,
+        now,
+      ]
+    );
+
+    res.setHeader("Cache-Control", "no-store");
+    return res.json({
+      ok: true,
+      device_id,
+      device_name: device_name || device_id,
+      fix,
+      lat: fix ? lat : null,
+      lon: fix ? lon : null,
+      hdop: fix && Number.isFinite(hdop) ? hdop : null,
+      gps_svs: fix && Number.isFinite(gps_svs) ? gps_svs : null,
+      updated_at: now,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: "location save failed", detail: e?.message || String(e) });
+  }
+});
 
 // POST /api/device/config
 // body: {device_id, a1, a2, a3}
