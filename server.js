@@ -96,6 +96,11 @@ app.get("/settings", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "settings.html"));
 });
 
+app.get("/dashboard.html", (req, res) => res.redirect("/dashboard"));
+app.get("/settings.html", (req, res) => res.redirect("/settings"));
+app.get("/config.html", (req, res) => res.redirect("/settings"));
+app.get("/ota.html", (req, res) => res.redirect("/settings"));
+
 // ===== Xendit client =====
 const xendit = axios.create({
   baseURL: "https://api.xendit.co",
