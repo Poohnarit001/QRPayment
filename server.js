@@ -86,7 +86,15 @@ app.use('/images', express.static(IMG_DIR, { etag: false, maxAge: 0 }));
 // ===== static dashboard files =====
 // Put dashboard.* into ./public
 app.use(express.static(path.join(__dirname, "public")));
-app.get("/", (req, res) => res.redirect("/dashboard.html"));
+app.get("/", (req, res) => res.redirect("/dashboard"));
+
+app.get("/dashboard", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "dashboard.html"));
+});
+
+app.get("/settings", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "settings.html"));
+});
 
 // ===== Xendit client =====
 const xendit = axios.create({
