@@ -681,6 +681,83 @@ app.get("/api/dashboard/locations", async (req, res) => {
 
 ;
 
+
+
+// POST /api/device/location
+// body: { device_id, device_name?, fix, lat?, lon?, hdop?, gps_svs? }
+app.post("/api/device/location", async (req, res) => {
+  try {
+    const device_id = safeDeviceId(req.body?.device_id);
+    const device_name = String(req.body?.device_name || device_id || "").trim().slice(0, 120);
+    const fix = Number(req.body?.fix) ? 1 : 0;
+
+    if (!device_id || device_id === "ALL") {
+      return res.status(400).json({ ok: false, error: "device_id required" });
+    }
+
+    const latRaw = req.body?.lat;
+    const lonRaw = req.body?.lon;
+    const hdopRaw = req.body?.hdop;
+    const gpsSvsRaw = req.body?.gps_svs;
+
+    const lat = (latRaw === undefined || latRaw === null || latRaw === "") ? null : Number(latRaw);
+    const lon = (lonRaw === undefined || lonRaw === null || lonRaw === "") ? null : Number(lonRaw);
+    const hdop = (hdopRaw === undefined || hdopRaw === null || hdopRaw === "") ? null : Number(hdopRaw);
+    const gps_svs = (gpsSvsRaw === undefined || gpsSvsRaw === null || gpsSvsRaw === "") ? null : Math.trunc(Number(gpsSvsRaw));
+
+    if (fix) {
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        return res.status(400).json({ ok: false, error: "lat/lon required when fix=1" });
+      }
+      if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+        return res.status(400).json({ ok: false, error: "lat/lon out of range" });
+      }
+    }
+
+    const now = Date.now();
+
+    await db.run(
+      `
+      INSERT INTO device_location (device_id, device_name, fix, lat, lon, hdop, gps_svs, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        device_name = VALUES(device_name),
+        fix = VALUES(fix),
+        lat = VALUES(lat),
+        lon = VALUES(lon),
+        hdop = VALUES(hdop),
+        gps_svs = VALUES(gps_svs),
+        updated_at = VALUES(updated_at)
+      `,
+      [
+        device_id,
+        device_name || device_id,
+        fix,
+        fix ? lat : null,
+        fix ? lon : null,
+        fix && Number.isFinite(hdop) ? hdop : null,
+        fix && Number.isFinite(gps_svs) ? gps_svs : null,
+        now,
+      ]
+    );
+
+    res.setHeader("Cache-Control", "no-store");
+    return res.json({
+      ok: true,
+      device_id,
+      device_name: device_name || device_id,
+      fix,
+      lat: fix ? lat : null,
+      lon: fix ? lon : null,
+      hdop: fix && Number.isFinite(hdop) ? hdop : null,
+      gps_svs: fix && Number.isFinite(gps_svs) ? gps_svs : null,
+      updated_at: now,
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: "location save failed", detail: e?.message || String(e) });
+  }
+});
+
 // POST /api/device/config
 // body: {device_id, a1, a2, a3}
 app.post("/api/device/config", async (req, res) => {
