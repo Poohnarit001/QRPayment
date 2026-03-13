@@ -5,7 +5,6 @@ const axios = require("axios");
 const path = require("path");
 const fs = require("fs");
 const multer = require("multer");
-const sharp = require("sharp");
 
 const mysql = require("mysql2/promise");
 
@@ -30,41 +29,9 @@ const otaUpload = multer({
 // - device_id = "ALL" -> public/images/splash.jpg
 // - device_id = "DEVxxxx" -> public/images/splash_DEVxxxx.jpg
 const IMG_DIR = path.join(__dirname, "public", "images");
-const IMG_WIFI_DIR = path.join(__dirname, "public", "images-wifi");
 
 function ensureDirSync(p) {
   if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
-}
-
-async function buildWifiSafeJpeg(inputPath, outputPath) {
-  ensureDirSync(path.dirname(outputPath));
-  await sharp(inputPath)
-    .rotate()
-    .resize(480, 320, { fit: "cover", position: "centre" })
-    .jpeg({
-      quality: 72,
-      progressive: false,
-      mozjpeg: false,
-    })
-    .toFile(outputPath);
-}
-
-async function ensureWifiVariant(filename) {
-  const src = path.join(IMG_DIR, filename);
-  const dst = path.join(IMG_WIFI_DIR, filename);
-  if (!fs.existsSync(src)) return false;
-
-  let rebuild = true;
-  if (fs.existsSync(dst)) {
-    const srcSt = fs.statSync(src);
-    const dstSt = fs.statSync(dst);
-    rebuild = dstSt.mtimeMs < srcSt.mtimeMs || dstSt.size <= 0;
-  }
-
-  if (rebuild) {
-    await buildWifiSafeJpeg(src, dst);
-  }
-  return fs.existsSync(dst);
 }
 
 function safeDeviceId(s) {
@@ -112,11 +79,9 @@ const BASE_URL = (process.env.BASE_URL || "").replace(/\/$/, "");
 const XENDIT_SECRET_KEY = process.env.XENDIT_SECRET_KEY;
 const XENDIT_WEBHOOK_TOKEN = process.env.XENDIT_WEBHOOK_TOKEN || "";
 
-// Serve images from data/images at /images/... and Wi-Fi-safe converted variants at /images-wifi/...
+// Serve images from data/images at /images/...
 ensureDirSync(IMG_DIR);
-ensureDirSync(IMG_WIFI_DIR);
 app.use('/images', express.static(IMG_DIR, { etag: false, maxAge: 0 }));
-app.use('/images-wifi', express.static(IMG_WIFI_DIR, { etag: false, maxAge: 0 }));
 
 // ===== static dashboard files =====
 // Put dashboard.* into ./public
@@ -371,26 +336,15 @@ app.get("/health", (req, res) => res.status(200).send("OK"));
 
 // ===== 5) Image assets (background/splash) =====
 // POST /api/images/upload (multipart/form-data) fields: device_id(optional="ALL"), image(.jpg)
-app.post("/api/images/upload", imageUpload.single("image"), async (req, res) => {
+app.post("/api/images/upload", imageUpload.single("image"), (req, res) => {
   try {
     const device_id = safeDeviceId(req.body?.device_id);
     if (!req.file) return res.status(400).json({ ok: false, error: "image required" });
 
     const filename = req.file.filename;
     const url = `/images/${filename}`;
-    const wifi_url = `/images-wifi/${filename}`;
     const full = path.join(IMG_DIR, filename);
     const st = fs.existsSync(full) ? fs.statSync(full) : { size: req.file.size || 0 };
-
-    let wifi_ready = false;
-    let wifi_error = "";
-    try {
-      wifi_ready = await ensureWifiVariant(filename);
-    } catch (e) {
-      wifi_ready = false;
-      wifi_error = e?.message || String(e);
-      console.error("[IMAGE] wifi variant build failed:", filename, wifi_error);
-    }
 
     res.setHeader("Cache-Control", "no-store");
     return res.json({
@@ -398,9 +352,6 @@ app.post("/api/images/upload", imageUpload.single("image"), async (req, res) => 
       device_id,
       filename,
       url,
-      wifi_url,
-      wifi_ready,
-      wifi_error,
       size: st.size || 0,
       updated_at: Date.now()
     });
@@ -443,35 +394,6 @@ app.get("/api/images/resolve", (req, res) => {
     return res.json({ ok: true, device_id, filename, url: `/images/${filename}` });
   } catch (e) {
     return res.status(500).json({ ok: false, error: "resolve image failed", detail: e?.message || String(e) });
-  }
-});
-
-// GET /api/images/resolve-wifi?device_id=DEVxxxx
-// - same filename selection as /api/images/resolve
-// - but returns a Wi-Fi-safe converted JPEG variant at /images-wifi/...
-app.get("/api/images/resolve-wifi", async (req, res) => {
-  try {
-    const device_id = safeDeviceId(req.query?.device_id);
-    ensureDirSync(IMG_DIR);
-    ensureDirSync(IMG_WIFI_DIR);
-
-    const cand = device_id === "ALL" ? "splash.jpg" : `splash_${device_id}.jpg`;
-    const full = path.join(IMG_DIR, cand);
-    const fallback = path.join(IMG_DIR, "splash.jpg");
-
-    let filename = "splash.jpg";
-    if (device_id !== "ALL" && fs.existsSync(full)) filename = cand;
-    else if (!fs.existsSync(fallback) && fs.existsSync(full)) filename = cand;
-
-    const ok = await ensureWifiVariant(filename);
-    if (!ok) {
-      return res.status(404).json({ ok: false, error: "wifi image not found", device_id, filename });
-    }
-
-    res.setHeader("Cache-Control", "no-store");
-    return res.json({ ok: true, device_id, filename, url: `/images-wifi/${filename}` });
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: "resolve wifi image failed", detail: e?.message || String(e) });
   }
 });
 
